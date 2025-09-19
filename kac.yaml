@@ -1,0 +1,16 @@
+---
+apiVersion: kubearchive.org/v1
+kind: KubeArchiveConfig
+metadata:
+  name: kubearchive
+  namespace: argo
+spec:
+  resources:
+    - selector:
+        apiVersion: v1
+        kind: Pod
+      archiveWhen: "true"
+    - selector:
+        apiVersion: argoproj.io/v1alpha1
+        kind: Workflow
+      archiveWhen: "true"

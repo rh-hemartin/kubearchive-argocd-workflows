@@ -1,0 +1,141 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: postgresql
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgresql
+  namespace: postgresql
+  labels:
+    app: postgresql
+spec:
+  selector:
+    matchLabels:
+      app: postgresql
+  template:
+    metadata:
+      labels:
+        app: postgresql
+    spec:
+      securityContext:
+        fsGroup: 1001  # User defined by the Dockerfile
+      volumes:
+        - name: ssl
+          secret:
+            secretName: postgresql-tls
+            defaultMode: 256
+      containers:
+        - name: postgresql
+          image: quay.io/kubearchive/postgresql:16.4.0
+          volumeMounts:
+            - name: ssl
+              mountPath: /mount/ssl-postgres/
+          ports:
+            - containerPort: 5432
+          resources:
+            requests:
+              cpu: 50m
+              memory: 100Mi
+          env:
+            - name: POSTGRESQL_DATABASE
+              value: kubearchive
+            - name: POSTGRESQL_USERNAME
+              value: kubearchive
+            - name: POSTGRESQL_PASSWORD
+              value: password  # notsecret
+            - name: POSTGRESQL_REPLICATION_USE_PASSFILE # https://github.com/bitnami/containers/issues/74788
+              value: "no"
+            - name: POSTGRESQL_ENABLE_TLS
+              value: "yes"
+            - name: POSTGRESQL_TLS_CERT_FILE
+              value: /mount/ssl-postgres/tls.crt
+            - name: POSTGRESQL_TLS_KEY_FILE
+              value: /mount/ssl-postgres/tls.key
+          securityContext:
+            readOnlyRootFilesystem: false
+            runAsNonRoot: false
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql
+  namespace: postgresql
+  labels:
+    app: postgresql
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: postgresql-tls
+spec:
+  ports:
+    - port: 5432
+  selector:
+    app: postgresql
+
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: postgresql-ca
+  namespace: postgresql
+spec:
+  selfSigned: {}
+
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: postgresql-ca
+  namespace: postgresql
+spec:
+  isCA: true
+  commonName: postgresql-ca-certificate
+  secretName: "postgresql-ca"
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: "postgresql-ca"
+    kind: Issuer
+    group: cert-manager.io
+
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: "postgresql"
+  namespace: postgresql
+spec:
+  ca:
+    secretName: "postgresql-ca"
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: postgresql-tls
+  namespace: postgresql
+spec:
+  isCA: false
+  commonName: postgresql
+  secretName: postgresql-tls
+  duration: 720h  # 30 days
+  renewBefore: 360h  # 15 days
+  subject:
+    organizations:
+      - postgresql
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  usages:
+    - digital signature
+    - key encipherment
+  dnsNames:
+    - localhost
+    - postgresql
+    - postgresql.postgresql.svc
+  issuerRef:
+    name: "postgresql"
+    kind: Issuer
+    group: cert-manager.io
